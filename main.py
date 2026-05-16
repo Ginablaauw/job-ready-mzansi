@@ -22,22 +22,23 @@ def build_mzansi_doc(cv_raw, letter_raw):
     navy = RGBColor(0, 51, 102)
     
     try:
-        for line in cv_raw.split('\n'):
+        lines = cv_raw.split('\n')
+        for line in lines:
             line = line.strip()
             if not line: continue
             
             if '[NAME]' in line:
                 p = doc.add_paragraph(line.replace('[NAME]', '').strip())
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                run = p.add_run() if not p.runs else p.runs[0]
+                run = p.runs[0] if p.runs else p.add_run()
                 run.bold, run.font.size, run.font.color.rgb = True, Pt(20), navy
             elif '[SECTION]' in line:
                 p = doc.add_heading(line.replace('[SECTION]', '').strip(), level=1)
-                run = p.add_run() if not p.runs else p.runs[0]
+                run = p.runs[0] if p.runs else p.add_run()
                 run.font.color.rgb = navy
             elif '[JOB]' in line:
                 p = doc.add_paragraph(line.replace('[JOB]', '').strip())
-                run = p.add_run() if not p.runs else p.runs[0]
+                run = p.runs[0] if p.runs else p.add_run()
                 run.bold = True
             else:
                 doc.add_paragraph(line, style='List Bullet' if line.startswith('-') else None)
@@ -49,10 +50,11 @@ def build_mzansi_doc(cv_raw, letter_raw):
 
         if letter_raw:
             doc.add_page_break()
-            doc.add_heading("COVER LETTER", level=1).runs[0].font.color.rgb = navy
+            h = doc.add_heading("COVER LETTER", level=1)
+            h.runs[0].font.color.rgb = navy
             doc.add_paragraph(letter_raw)
     except Exception as e:
-        doc.add_paragraph(f"\n[Formatting Note: {cv_raw}]")
+        doc.add_paragraph(f"\n[Note: {cv_raw}]")
 
     out = BytesIO()
     doc.save(out)
@@ -61,32 +63,32 @@ def build_mzansi_doc(cv_raw, letter_raw):
 
 async def fetch_jobs(cv_text):
     try:
-        p = f"What is the best job title for this person in South Africa? Title only: {cv_text[:300 print('Fetching Jobs...')[:500]]}"
+        # Fixed the syntax error here
+        p = f"What is the best job title for this person in South Africa? Title only: {cv_text[:500]}"
         res = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role":"user","content":p}])
         title = res.choices[0].message.content.strip()
+        
         aid, akey = os.environ.get("ADZUNA_APP_ID"), os.environ.get("ADZUNA_APP_KEY")
         url = f"https://api.adzuna.com/v1/api/jobs/za/search/1?app_id={aid}&app_key={akey}&results_per_page=5&what={title}"
         async with httpx.AsyncClient() as client:
             r = await client.get(url)
             jobs = r.json().get("results", [])
             return "\n\n".join([f"📍 *{j['title']}*\n🏢 {j['company']['display_name']}\n🔗 {j['redirect_url']}" for j in jobs])
-    except: return "No jobs found right now."
+    except:
+        return "No matching jobs found at this moment."
 
 # --- WEBHOOK ---
 @app.post("/webhook")
 async def receive(request: Request):
     try:
         data = await request.json()
-        # CRITICAL FIX: Only process if there is a 'messages' list
         val = data.get("entry", [{}])[0].get("changes", [{}])[0].get("value", {})
-        if "messages" not in val:
-            return {"status": "ok"}
+        if "messages" not in val: return {"status": "ok"}
             
         msg = val["messages"][0]
         phone = msg["from"]
         if phone not in db: db[phone] = {"cv": ""}
         u = db[phone]
-
         headers = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
 
         if msg.get("type") == "interactive":
@@ -94,8 +96,11 @@ async def receive(request: Request):
             if bid == "PRO_AUDIT":
                 await httpx.AsyncClient().post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages", headers=headers, json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": "🎨 Designing your Pro Bundle... ⏳"}})
                 
-                cv_p = f"Rewrite this CV. Use markers: [NAME] for name, [SECTION] for headers, [JOB] for job titles. TEXT: {u['cv'][:2000]}"
+                # CV Prompt
+                cv_p = f"Rewrite this CV. Use EXACT markers: [NAME] for name, [SECTION] for headers, [JOB] for job titles. TEXT: {u['cv'][:2000]}"
                 cv_res = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role":"user","content":cv_p}])
+                
+                # Letter Prompt
                 let_p = f"Write a professional SA cover letter for: {u['cv'][:1000]}"
                 let_res = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role":"user","content":let_p}])
                 
@@ -105,8 +110,9 @@ async def receive(request: Request):
                     up = await client.post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/media", headers=headers, files={"file": ("Pro_Mzansi_Bundle.docx", docx, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}, data={"messaging_product": "whatsapp", "type": "document"})
                     mid = up.json().get("id")
                     await client.post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages", headers=headers, json={"messaging_product": "whatsapp", "to": phone, "type": "document", "document": {"id": mid, "filename": "Pro_Mzansi_Bundle.docx"}})
-                    jobs = await fetch_jobs(u["cv"])
-                    await client.post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages", headers=headers, json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": f"🔥 *JOBS FOR YOU:*\n\n{jobs}"}})
+                    
+                    jobs_list = await fetch_jobs(u["cv"])
+                    await client.post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages", headers=headers, json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": f"🔥 *JOBS FOR YOU:*\n\n{jobs_list}"}})
 
         elif msg.get("type") == "document":
             async with httpx.AsyncClient() as client:
@@ -119,7 +125,6 @@ async def receive(request: Request):
             await httpx.AsyncClient().post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages", headers=headers, json=btn_data)
         
         else:
-            # Simple Welcome for everything else
             welcome = {"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": "Welcome to Job Ready Mzansi! 🇿🇦\n\nPlease upload your CV as a PDF to begin."}}
             await httpx.AsyncClient().post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages", headers=headers, json=welcome)
 
@@ -129,4 +134,5 @@ async def receive(request: Request):
 
 @app.get("/webhook")
 async def verify(request: Request):
-    return Response(content=request.query_params.get("hub.challenge"), status_code=200)
+    challenge = request.query_params.get("hub.challenge")
+    return Response(content=challenge, status_code=200)
