@@ -16,21 +16,57 @@ groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 db = {}
 
-async def send_text(to, text):
-    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
-    headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}
-    await httpx.AsyncClient().post(url, headers=headers, json={"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}})
+# --- STYLING ENGINE ---
+def build_mzansi_doc(cv_raw, letter_raw):
+    doc = Document()
+    navy = RGBColor(0, 51, 102)
+    gray = RGBColor(128, 128, 128)
 
-async def send_doc(to, file_bytes, filename):
-    headers = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
-    async with httpx.AsyncClient() as client:
-        up = await client.post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/media", headers=headers, files={"file": (filename, file_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}, data={"messaging_product": "whatsapp", "type": "document"})
-        mid = up.json().get("id")
-        await client.post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages", headers=headers, json={"messaging_product": "whatsapp", "to": to, "type": "document", "document": {"id": mid, "filename": filename}})
+    # 1. PROCESS THE CV
+    for line in cv_raw.split('\n'):
+        line = line.strip()
+        if not line: continue
+        
+        if line.startswith('[NAME]'):
+            p = doc.add_paragraph(line.replace('[NAME]', ''))
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = p.runs[0]
+            run.bold, run.font.size, run.font.color.rgb = True, Pt(22), navy
+        elif line.startswith('[INFO]'):
+            p = doc.add_paragraph(line.replace('[INFO]', ''))
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.runs[0].font.size, p.runs[0].font.color.rgb = Pt(10), gray
+        elif line.startswith('[SECTION]'):
+            p = doc.add_heading(line.replace('[SECTION]', ''), level=1)
+            p.runs[0].font.color.rgb = navy
+            p.runs[0].font.size = Pt(14)
+        elif line.startswith('[JOB]'):
+            p = doc.add_paragraph(line.replace('[JOB]', ''))
+            p.runs[0].bold = True
+        else:
+            doc.add_paragraph(line, style='List Bullet' if line.startswith('-') else None)
+
+    # 2. ADD POPIA FOOTER
+    doc.add_paragraph("\n" + "_"*30)
+    footer = doc.add_paragraph("POPIA COMPLIANCE: I hereby give consent that my personal information may be processed for the purpose of job applications as per the Protection of Personal Information Act.")
+    footer.runs[0].font.size = Pt(8)
+    footer.runs[0].italic = True
+
+    # 3. COVER LETTER PAGE
+    if letter_raw:
+        doc.add_page_break()
+        h = doc.add_heading("PROFESSIONAL COVER LETTER", level=1)
+        h.runs[0].font.color.rgb = navy
+        doc.add_paragraph(letter_raw)
+
+    out = BytesIO()
+    doc.save(out)
+    out.seek(0)
+    return out
 
 async def fetch_jobs(cv_text):
-    # Extracting job title using AI
-    p = f"Extract only the job title this person should apply for: {cv_text[:500]}"
+    # Extracting title
+    p = f"Based on this CV, what is the #1 job title they should apply for in Mzansi? Answer only the title: {cv_text[:500]}"
     res = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role":"user","content":p}])
     title = res.choices[0].message.content.strip()
     
@@ -38,32 +74,10 @@ async def fetch_jobs(cv_text):
     url = f"https://api.adzuna.com/v1/api/jobs/za/search/1?app_id={aid}&app_key={akey}&results_per_page=5&what={title}"
     async with httpx.AsyncClient() as client:
         r = await client.get(url)
-        results = r.json().get("results", [])
-        return "\n\n".join([f"📍 *{j['title']}*\n🏢 {j['company']['display_name']}\n🔗 {j['redirect_url']}" for j in results])
+        jobs = r.json().get("results", [])
+        return "\n\n".join([f"📍 *{j['title']}*\n🏢 {j['company']['display_name']}\n🔗 {j['redirect_url']}" for j in jobs])
 
-def create_mzansi_docx(cv_content, letter_content=None):
-    doc = Document()
-    navy = RGBColor(0, 51, 102)
-    # Header logic (AI should provide [H] and [S] markers)
-    for line in cv_content.split('\n'):
-        if line.startswith('[H]'):
-            p = doc.add_paragraph(line.replace('[H]', ''))
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            run = p.runs[0]
-            run.bold, run.font.size, run.font.color.rgb = True, Pt(16), navy
-        elif line.startswith('[S]'):
-            doc.add_heading(line.replace('[S]', ''), level=1).runs[0].font.color.rgb = navy
-        else:
-            doc.add_paragraph(line)
-    if letter_content:
-        doc.add_page_break()
-        doc.add_heading("COVER LETTER", level=1).runs[0].font.color.rgb = navy
-        doc.add_paragraph(letter_content)
-    out = BytesIO()
-    doc.save(out)
-    out.seek(0)
-    return out
-
+# --- WEBHOOKS ---
 @app.post("/webhook")
 async def receive(request: Request):
     try:
@@ -78,36 +92,42 @@ async def receive(request: Request):
         if msg["type"] == "interactive":
             bid = msg["interactive"]["button_reply"]["id"]
             if bid == "PRO_AUDIT":
-                await send_text(phone, "🚀 *AUDIT MODE:* Crafting your Premium Bundle & Searching Jobs... (Wait 30s)")
-                cv_p = f"Professional Mzansi CV. Use [H] for Name and [S] for Sections. TEXT: {u['cv'][:2000]}"
+                # CV Prompt with Structure Markers
+                cv_p = f"Rewrite this CV. Use these EXACT markers: [NAME] for name, [INFO] for contact details, [SECTION] for major headers, [JOB] for job titles. Use achievement-based bullets. TEXT: {u['cv'][:2000]}"
                 cv_res = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role":"user","content":cv_p}])
-                let_p = f"Write a professional cover letter based on: {u['cv'][:1000]}"
+                
+                # Letter Prompt
+                let_p = f"Write a professional South African cover letter based on this CV: {u['cv'][:1000]}"
                 let_res = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role":"user","content":let_p}])
-                docx = create_mzansi_docx(cv_res.choices[0].message.content, let_res.choices[0].message.content)
-                await send_doc(phone, docx, "Mzansi_Pro_Bundle.docx")
-                jobs = await fetch_jobs(u["cv"])
-                await send_text(phone, f"🔥 *MATCHING JOBS:*\n\n{jobs}")
+                
+                # Build Doc
+                docx = build_mzansi_doc(cv_res.choices[0].message.content, let_res.choices[0].message.content)
+                
+                # Send Everything
+                headers = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
+                async with httpx.AsyncClient() as client:
+                    # Upload
+                    up = await client.post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/media", headers=headers, files={"file": ("Mzansi_Pro_Bundle.docx", docx, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}, data={"messaging_product": "whatsapp", "type": "document"})
+                    mid = up.json().get("id")
+                    # Send Doc
+                    await client.post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages", headers=headers, json={"messaging_product": "whatsapp", "to": phone, "type": "document", "document": {"id": mid, "filename": "Pro_Mzansi_Bundle.docx"}})
+                    # Send Jobs
+                    jobs = await fetch_jobs(u["cv"])
+                    await client.post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages", headers=headers, json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": f"🔥 *MATCHING JOBS IN MZANSI:*\n\n{jobs}"}})
 
         elif msg["type"] == "document":
-            await send_text(phone, "Analyzing... ⚖️")
             headers = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
             async with httpx.AsyncClient() as client:
                 r = await client.get(f"https://graph.facebook.com/v18.0/{msg['document']['id']}", headers=headers)
-                file_r = await client.get(r.json().get("url"), headers=headers)
-                with fitz.open(stream=file_r.content, filetype="pdf") as doc:
+                f_r = await client.get(r.json().get("url"), headers=headers)
+                with fitz.open(stream=f_r.content, filetype="pdf") as doc:
                     u["cv"] = "".join([page.get_text() for page in doc])
             
-            report = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role":"user","content":f"Analyze this ZA CV. Score 1-100. 2 tips. CV: {u['cv'][:2000]}"}])
-            await send_text(phone, f"📊 *REPORT:*\n\n{report.choices[0].message.content}")
-            # Audit Button (No payment required for this test)
-            fb = [{"type": "reply", "reply": {"id": "PRO_AUDIT", "title": "📥 Download Pro CV"}}]
-            data = {"messaging_product": "whatsapp", "to": phone, "type": "interactive", "interactive": {"type": "button", "body": {"text": "Click to audit the final product quality:"}, "action": {"buttons": fb}}}
+            # Interactive Buttons
+            data = {"messaging_product": "whatsapp", "to": phone, "type": "interactive", "interactive": {"type": "button", "body": {"text": "Analysis complete. Download the Pro Mzansi Bundle?"}, "action": {"buttons": [{"type": "reply", "reply": {"id": "PRO_AUDIT", "title": "📥 Download Bundle"}}, {"type": "reply", "reply": {"id": "RESTART", "title": "🔄 Restart"}}]}}}
             await httpx.AsyncClient().post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages", headers=headers, json=data)
 
-        else:
-            await send_text(phone, "Welcome! Upload your PDF CV to start the quality audit.")
-
-    except Exception: pass
+    except Exception as e: print(f"ERROR: {e}")
     return {"status": "success"}
 
 @app.get("/webhook")
