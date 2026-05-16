@@ -14,39 +14,56 @@ groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 db = {}
 
-# --- MODERN PDF ENGINE ---
-def create_modern_pdf(cv_text, type="CV"):
-    # This HTML creates a high-end designer layout
+# --- THE PROFESSIONAL DESIGNER (HTML/CSS) ---
+def create_designer_pdf(data):
+    # This is a high-end table-based layout for PDF stability
     html = f"""
     <html>
     <head>
         <style>
-            @page {{ size: a4; margin: 0cm; }}
-            body {{ font-family: 'Helvetica', sans-serif; margin: 0; padding: 0; color: #333; }}
-            .container {{ display: flex; width: 100%; height: 100%; }}
-            .sidebar {{ width: 200pt; background-color: #002D62; color: white; padding: 30pt; height: 1000pt; }}
-            .content {{ padding: 40pt; }}
-            .name {{ font-size: 28pt; font-weight: bold; color: #002D62; text-transform: uppercase; }}
-            .section-h {{ font-size: 14pt; font-weight: bold; color: #002D62; border-bottom: 2px solid #002D62; margin-top: 20pt; padding-bottom: 5pt; text-transform: uppercase; }}
-            .job-title {{ font-weight: bold; font-size: 12pt; margin-top: 10pt; }}
-            .footer {{ font-size: 8pt; color: #777; font-style: italic; margin-top: 40pt; border-top: 1px solid #ccc; padding-top: 10pt; }}
+            @page {{ size: a4; margin: 0; }}
+            body {{ font-family: 'Helvetica', 'Arial', sans-serif; color: #333; margin: 0; padding: 0; }}
+            .header {{ background-color: #002D62; color: white; padding: 40px; text-align: center; }}
+            .name {{ font-size: 32px; font-weight: bold; letter-spacing: 2px; text-transform: uppercase; }}
+            .title {{ font-size: 14px; color: #DAA520; margin-top: 5px; font-weight: bold; }}
+            .container {{ width: 100%; }}
+            .sidebar {{ background-color: #f4f4f4; width: 30%; padding: 30px; vertical-align: top; }}
+            .main-content {{ width: 70%; padding: 40px; vertical-align: top; }}
+            .section-label {{ color: #002D62; font-size: 16px; font-weight: bold; border-bottom: 2px solid #002D62; margin-bottom: 10px; padding-bottom: 5px; text-transform: uppercase; }}
+            .item-title {{ font-weight: bold; color: #333; font-size: 13px; margin-top: 15px; }}
+            .item-meta {{ font-size: 11px; color: #666; font-style: italic; }}
+            .bullet {{ margin-left: 15px; font-size: 12px; color: #444; }}
+            .popia-box {{ margin-top: 50px; padding: 15px; border: 1px solid #ccc; font-size: 9px; color: #777; background-color: #fafafa; font-style: italic; }}
         </style>
     </head>
     <body>
-        <div class="sidebar">
-            <h2 style="color: white; font-size: 16pt;">CONTACT</h2>
-            <p style="font-size: 10pt;">Details as provided in application.</p>
-            <h2 style="color: white; font-size: 16pt; margin-top: 30pt;">LEGAL</h2>
-            <p style="font-size: 9pt;">This document is POPIA compliant. Information processed for recruitment only.</p>
+        <div class="header">
+            <div class="name">{data.get('full_name', 'Professional Candidate')}</div>
+            <div class="title">{data.get('profession', 'Expert Professional')}</div>
         </div>
-        <div class="content">
-            <div class="name">PRO CANDIDATE</div>
-            <div class="section-h">Professional Summary</div>
-            <p style="font-size: 11pt; line-height: 1.5;">{cv_text[:3000].replace('[SUMMARY]', '').strip()}</p>
-            <div class="section-h">Work Experience & Skills</div>
-            <p style="font-size: 11pt; white-space: pre-wrap;">{cv_text[500:2500]}</p>
-            <div class="footer">MZANSI JOB READY: Generated in compliance with SA Labour Law and POPIA regulations.</div>
-        </div>
+        <table class="container" cellpadding="0" cellspacing="0">
+            <tr>
+                <td class="sidebar">
+                    <div class="section-label">Contact</div>
+                    <p style="font-size: 11px;">{data.get('contact_info', 'Contact provided on request')}</p>
+                    <div class="section-label" style="margin-top: 30px;">Top Skills</div>
+                    <p style="font-size: 11px;">{data.get('skills', '')}</p>
+                </td>
+                <td class="main-content">
+                    <div class="section-label">Professional Summary</div>
+                    <p style="font-size: 12px; line-height: 1.6;">{data.get('summary', '')}</p>
+                    
+                    <div class="section-label" style="margin-top: 30px;">Experience</div>
+                    <div style="font-size: 12px;">{data.get('experience', '').replace('\\n', '<br/>')}</div>
+                    
+                    <div class="popia-box">
+                        <b>POPIA ACT COMPLIANCE:</b> By sharing this document, I hereby give consent that my personal information 
+                        may be processed for the purpose of job applications and recruitment in accordance with the 
+                        Protection of Personal Information Act of South Africa.
+                    </div>
+                </td>
+            </tr>
+        </table>
     </body>
     </html>
     """
@@ -55,19 +72,14 @@ def create_modern_pdf(cv_text, type="CV"):
     pdf_file.seek(0)
     return pdf_file
 
-async def send_wa(to, payload):
-    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
-    headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}
-    async with httpx.AsyncClient() as client:
-        return await client.post(url, headers=headers, json=payload)
-
-async def fetch_jobs(query):
+async def fetch_mzansi_jobs(profile):
     aid, akey = os.environ.get("ADZUNA_APP_ID"), os.environ.get("ADZUNA_APP_KEY")
-    url = f"https://api.adzuna.com/v1/api/jobs/za/search/1?app_id={aid}&app_key={akey}&results_per_page=5&what={query}"
+    url = f"https://api.adzuna.com/v1/api/jobs/za/search/1?app_id={aid}&app_key={akey}&results_per_page=10&what={profile}"
     async with httpx.AsyncClient() as client:
         r = await client.get(url)
-        data = r.json().get("results", [])
-        return "\n\n".join([f"📍 {j['title']} - {j['company']['display_name']}\n🔗 {j['redirect_url']}" for j in data])
+        results = r.json().get("results", [])
+        if not results: return "No specific matches found today. Try searching for 'Admin Finance' directly on PNet."
+        return "\n\n".join([f"📍 *{j['title']}*\n🏢 {j['company']['display_name']}\n🔗 {j['redirect_url']}" for j in results])
 
 @app.post("/webhook")
 async def receive(request: Request):
@@ -75,64 +87,56 @@ async def receive(request: Request):
         data = await request.json()
         val = data.get("entry", [{}])[0].get("changes", [{}])[0].get("value", {})
         if "messages" not in val: return {"status": "ok"}
-        
         msg = val["messages"][0]
         phone = msg["from"]
         if phone not in db: db[phone] = {"cv": "", "state": "START"}
         u = db[phone]
 
-        # 1. POPIA CONSENT (Legal First Priority)
+        # 1. POPIA FIRST
         if u["state"] == "START":
-            btn = {
-                "messaging_product": "whatsapp", "to": phone, "type": "interactive",
-                "interactive": {
-                    "type": "button", "body": {"text": "Welcome to *Job Ready Mzansi* 🇿🇦\n\nTo begin, you must agree to our Privacy Policy. We are 100% POPIA compliant. Your data is only used to build your CV."},
-                    "action": {"buttons": [{"type": "reply", "reply": {"id": "AGREE", "title": "I Agree ✅"}}, {"type": "reply", "reply": {"id": "INFO", "title": "How it works"}}] }
-                }
-            }
-            await send_wa(phone, btn)
-            u["state"] = "AWAITING_CONSENT"
+            btn = {"messaging_product": "whatsapp", "to": phone, "type": "interactive", "interactive": {"type": "button", "body": {"text": "Welcome to *Job Ready Mzansi* 🇿🇦\n\nTo begin, do you agree to our Privacy Policy? We are 100% POPIA compliant. Your data is used ONLY to build your CV."}, "action": {"buttons": [{"type": "reply", "reply": {"id": "AGREE", "title": "I Agree ✅"}}]}}}
+            async with httpx.AsyncClient() as client:
+                await client.post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages", headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, json=btn)
+            u["state"] = "CONSENTED"
             return {"status": "ok"}
 
-        # 2. HANDLE ACTIONS
+        # 2. ACTIONS
         if msg.get("type") == "interactive":
             bid = msg["interactive"]["button_reply"]["id"]
             if bid == "AGREE":
-                u["state"] = "READY"
-                await send_wa(phone, {"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": "✅ Consent recorded. Please upload your current CV as a *PDF* now."}})
-            elif bid == "GET_CV":
-                await send_wa(phone, {"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": "🎨 Architecting your Professional PDF... ⏳"}})
-                pdf = create_modern_pdf(u["cv"])
-                # Send Document
-                files = {"file": ("Mzansi_Pro_CV.pdf", pdf, "application/pdf")}
+                await httpx.AsyncClient().post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages", headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": "✅ Thank you. Please upload your current CV as a *PDF* now."}})
+            elif bid == "PRO":
+                await httpx.AsyncClient().post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages", headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": "🎨 Architecting your Premium Executive PDF... ⏳"}})
+                
+                # Get structured JSON from AI
+                p = f"Analyze this CV and output ONLY a JSON object with: 'full_name', 'profession', 'contact_info', 'skills', 'summary', 'experience' (with bullet points). CV: {u['cv'][:2000]}"
+                res = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", response_format={"type": "json_object"}, messages=[{"role":"user","content":p}])
+                cv_json = json.loads(res.choices[0].message.content)
+                
+                # Create PDF
+                pdf = create_designer_pdf(cv_json)
+                
+                # Send PDF
                 async with httpx.AsyncClient() as client:
-                    up = await client.post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/media", headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, files=files, data={"messaging_product": "whatsapp", "type": "document"})
+                    up = await client.post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/media", headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, files={"file": ("Mzansi_Executive_CV.pdf", pdf, "application/pdf")}, data={"messaging_product": "whatsapp", "type": "document"})
                     mid = up.json().get("id")
-                    await client.post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages", headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, json={"messaging_product": "whatsapp", "to": phone, "type": "document", "document": {"id": mid, "filename": "Pro_Mzansi_CV.pdf"}})
+                    await client.post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages", headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, json={"messaging_product": "whatsapp", "to": phone, "type": "document", "document": {"id": mid, "filename": "Premium_Mzansi_CV.pdf"}})
                     
-                # Send Jobs
-                jobs = await fetch_jobs("Admin Finance HR")
-                await send_wa(phone, {"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": f"🔥 *10 JOB OPENINGS IN SA:*\n\n{jobs}"}})
+                    # Send Jobs
+                    jobs = await fetch_mzansi_jobs(cv_json.get('profession', 'Finance Admin'))
+                    await client.post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages", headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": f"🔥 *MATCHING JOBS IN SA FOR YOU:*\n\n{jobs}"}})
 
-        # 3. HANDLE CV UPLOAD
+        # 3. CV UPLOAD
         elif msg.get("type") == "document":
-            await send_wa(phone, {"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": "Reading your CV for SA standards... ⚖️"}})
             async with httpx.AsyncClient() as client:
                 r = await client.get(f"https://graph.facebook.com/v18.0/{msg['document']['id']}", headers={"Authorization": f"Bearer {ACCESS_TOKEN}"})
                 f_r = await client.get(r.json().get("url"), headers={"Authorization": f"Bearer {ACCESS_TOKEN}"})
                 with fitz.open(stream=f_r.content, filetype="pdf") as doc:
                     u["cv"] = "".join([page.get_text() for page in doc])
             
-            # AI Analysis Report
-            p = f"Act as a South African Recruiter. Score this CV (1-100) and give 2 tips based on SA law. TEXT: {u['cv'][:1500]}"
-            res = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role":"user","content":p}])
-            report = res.choices[0].message.content
-            
-            # Send Report as Text First
-            await send_wa(phone, {"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": f"📊 *MZANSI ANALYSIS:*\n\n{report}"}})
-            # Then Send Buttons
-            btn = {"messaging_product": "whatsapp", "to": phone, "type": "interactive", "interactive": {"type": "button", "body": {"text": "What would you like to do next?"}, "action": {"buttons": [{"type": "reply", "reply": {"id": "GET_CV", "title": "📥 Download Pro PDF"}}, {"type": "reply", "reply": {"id": "START", "title": "🔄 Start Over"}}]}}}
-            await send_wa(phone, btn)
+            btn = {"messaging_product": "whatsapp", "to": phone, "type": "interactive", "interactive": {"type": "button", "body": {"text": "✅ CV Read. Get your professional Score and Pro PDF?"}, "action": {"buttons": [{"type": "reply", "reply": {"id": "PRO", "title": "📥 Get Pro Bundle"}}]}}}
+            async with httpx.AsyncClient() as client:
+                await client.post(f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages", headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, json=btn)
 
     except Exception as e: print(f"ERROR: {e}")
     return {"status": "success"}
@@ -140,4 +144,3 @@ async def receive(request: Request):
 @app.get("/webhook")
 async def verify(request: Request):
     return Response(content=request.query_params.get("hub.challenge"), status_code=200)
-    
