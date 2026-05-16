@@ -1,1 +1,6 @@
-
+fastapi
+uvicorn
+httpx
+groq
+PyMuPDF
+python-docx
